@@ -9,6 +9,9 @@ import sys
 import subprocess
 import time
 
+output_avgrss=[]
+output_rss=[]
+
 class Issue(Exception):
     def __init__(self, msg):
         self.msg = msg
@@ -33,15 +36,33 @@ def qq(s):
 def run(db, queryfile):
     # We assume $PATH is already set for all MonetDB binary files
     # /usr/bin/env searches the PATH for us
-    cmd = ['/usr/bin/env', "mclient", '-tperformance', '-fraw', '-d', db, queryfile]
+    cmd = ['../run_with_memory_monitor.sh',str(args.memory), "mclient", '-tperformance', '-fraw', '-d', db, queryfile]
+    print(" ".join(cmd))
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         (res, err) = p.communicate()
     except subprocess.CalledProcessError as e:
         print("Query \"%s\" triggered an exception:" % queryfile, file=sys.stderr)
         raise e
-    
+    #print(res,err)
+    pt_vsz = re.compile(rb"vsz=\d+ ")
+    vsz = int(pt_vsz.search(res).group(0)[4:-1])
+    pt_rss = re.compile(rb"rss=\d+ ")
+    rss = int(pt_rss.search(res).group(0)[4:-1])
+    pt_avgrss = re.compile(rb"avgrss=\d+")
+    avgrss = int(pt_avgrss.search(res).group(0)[7:])
+    # print(vsz,rss,avgrss)
+    #if (output_iter//args.init_no+1)*2 != len(output):
+    #    output.append(rss)
+    #    output.append(avgrss)
+    #else:
+    #    if output[(output_iter//args.init_no)*2]<rss:
+    #        output[(output_iter//args.init_no)*2]=rss
+    #    if output[(output_iter//args.init_no)*2+1]<avgrss:
+    #        output[(output_iter//args.init_no)*2+1]=avgrss
     # Look for something like this: clk: 1297.253 ms
+    output_rss.append(rss)
+    output_avgrss.append(avgrss)
     pattern = re.compile(rb'^clk:\s*(\d+\.\d+)\s*ms\s*$', re.M)
     m = pattern.search(err)
     if not m:
@@ -51,6 +72,8 @@ def run(db, queryfile):
     return float(m.group(1))
 
 def main(args):
+    global output_rss
+    global output_avgrss
     config = args.name or args.db
 
     outfilename = config + ".csv"
@@ -60,12 +83,13 @@ def main(args):
         else:
             outfilename = args.output
     if os.path.exists(outfilename):
-        print("Output file \"%s\" already exists" % outfilename, file=sys.stderr)
-        sys.exit(1)
-    write = writer(outfilename, not args.silent)
-    write("dbname,seqno,query,exec_time,perf_dev,dev_pcnt,perf_stts")
+        write = writer(outfilename, not args.silent)
+    else:
+        write = writer(outfilename, not args.silent)
+        write("dbname,seqno,query,exec_time,perf_dev,dev_pcnt,perf_stts,rss,avgrss,memory")
 
     queries = sorted(glob.glob('??.sql'))
+    queries=['21.sql','22.sql']
     if not queries:
         raise Issue("No queries found")
 
@@ -83,7 +107,10 @@ def main(args):
         base_performance[q] = sum(qtimes)/len(qtimes)
         # also write this normal time to the output file
         name = "q"+os.path.splitext(os.path.basename(q))[0]
-        write("%s,%d,%s,%.2f,%.2f,%.2f%%,%d", qq(config), seq, qq(name), base_performance[q], 0,0,0)
+        print(qq(config), seq, qq(name), base_performance[q], 0,0,0,max(output_rss),max(output_avgrss),args.memory)
+        write("%s,%d,%s,%.2f,%.2f,%.2f%%,%d,%d,%d,%d", qq(config), seq, qq(name), base_performance[q], 0,0,0,max(output_rss),max(output_avgrss),args.memory)
+        output_rss=[]
+        output_avgrss=[]
 
     # Now repeatedly run the queries randomly to monitor their performances
     rnd = random.Random(0)
@@ -91,6 +118,7 @@ def main(args):
     deadline = time.time() + (args.duration or float("inf"))
     patience = args.patience or 0
     threshold = args.threshold or 0.25
+    memory = args.memory
     wait = patience
     alert = 0
     while not done:
@@ -110,8 +138,9 @@ def main(args):
                     wait += 1
                     if wait == patience:
                         alert = 0
-            write("%s,%d,%s,%.2f,%.2f,%.2f%%,%d", qq(config), seq, qq(name), qtime, dev, devpercnt*100, alert)
-
+            write("%s,%d,%s,%.2f,%.2f,%.2f%%,%d,%d,%d,%d", qq(config), seq, qq(name), qtime, dev, devpercnt*100, alert,max(output_rss),max(output_avgrss),args.memory)
+            output_rss=[]
+            output_avgrss=[]
         # we always finish executing a full query set
         if time.time() >= deadline:
             done = True
@@ -137,7 +166,8 @@ parser.add_argument('--patience', '-p', type=int,
                     help='Wait for how many degraded queries before changing the performance status, 0: immediately.')
 parser.add_argument('--threshold', '-t', type=float,
                     help='How much slower (in percentage) compared to its baseline performance should we regard a query\'s performance to have degradated, default: 0.25.')
-
+parser.add_argument('--memory', '-m', type=int,default=100,
+		help='memory size limit implemented by cgroup')
 if __name__ == "__main__":
     try:
         args = parser.parse_args()
