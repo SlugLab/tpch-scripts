@@ -3,8 +3,8 @@ first_arg="$1"
 shift
 echo First argument: "$first_arg"
 echo Remaining arguments: "$@"
-mserver5 --dbpath=/home/victoryang00/tpch-scripts/SF-1/$5 --set monet_vault_key=/home/victoryang00/tpch-scripts/SF-1/$5/.vaultkey &
-echo mserver5 --dbpath=/home/victoryang00/tpch-scripts/SF-1/$5 --set monet_vault_key=/home/victoryang00/tpch-scripts/SF-1/$5/.vaultkey 
+mserver5 --dbpath=/tmp/mydbfarm/SF-10/$5 --set monet_vault_key=/tmp/mydbfarm/SF-10/$5/.vaultkey &
+echo mserver5 --dbpath=/tmp/mydbfarm/SF-10/$5 --set monet_vault_key=/tmp/mydbfarm/SF-10/$5/.vaultkey 
 pid1=$!
 echo $pid1 > /sys/fs/cgroup/memory/my_cgroup/cgroup.procs
 echo $(($first_arg * 1024 * 1024 * 1024)) > /sys/fs/cgroup/memory/my_cgroup/memory.limit_in_bytes
